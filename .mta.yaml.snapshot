@@ -1,0 +1,224 @@
+_schema-version: '3.1'
+ID: coule
+version: 1.0.0
+description: A simple CAP project.
+parameters:
+  deploy_mode: html5-repo
+  enable-parallel-deployments: true
+build-parameters:
+  before-all:
+    - builder: custom
+      commands:
+        - rm -rf build/dist
+        - mkdir -p build/dist
+        - rm -rf build/ui-deployer
+        - mkdir -p build/ui-deployer
+    - builder: custom
+      commands:
+        - npm install --production
+        - >-
+          bash -c "cds -v | grep 'cds-dk' || npm i --production --no-save
+          @sap/cds-dk @sap/mdk-tools"
+        - bash -c "export PATH=$PATH:$(pwd)/node_modules/.bin"
+        - cds build --production
+  after-all:
+    - builder: custom
+      commands:
+        - npm install
+modules:
+  - name: coule-db-deployer
+    type: hdb
+    path: gen/db
+    parameters:
+      buildpack: nodejs_buildpack
+    build-parameters:
+      builder: npm
+      ignore:
+        - node_modules
+        - package-lock.json
+    requires:
+      - name: coule-service-uaa
+      - name: coule-service-db
+      - name: coule-db
+  - name: coule-srv
+    type: nodejs
+    path: gen/srv
+    parameters:
+      memory: 256MB
+    provides:
+      - name: srv-api
+        properties:
+          srv-url: ${default-url}
+    build-parameters:
+      builder: npm
+      ignore:
+        - node_modules
+        - package-lock.json
+    requires:
+      - name: coule-service-uaa
+      - name: coule-service-db
+      - name: coule-service-destination
+      - name: coule-service-metadata
+      - name: coule-service-connectivity
+      - name: coule-service-logs
+      - name: coule-messaging
+      - name: coule-db
+  - name: coule-aux-destinations
+    type: com.sap.application.content
+    parameters:
+      content:
+        subaccount:
+          existing_destinations_policy: update
+          destinations:
+            - Authentication: OAuth2UserTokenExchange
+              Name: coule-service-uaa
+              ServiceInstanceName: coule-uaa
+              ServiceKeyName: coule-uaa-key
+              sap.cloud.service: lcap.coule
+            - Authentication: OAuth2UserTokenExchange
+              Name: coule-app-srv
+              TokenServiceInstanceName: coule-uaa
+              TokenServiceKeyName: coule-uaa-key
+              URL: ~{srv-api/srv-url}
+              sap.cloud.service: lcap.coule
+            - Name: coule-service-html5-apps-repo-host
+              ServiceInstanceName: coule-html5-apps-repo-host
+              ServiceKeyName: coule-html5-apps-repo-host-key
+              sap.cloud.service: lcap.coule
+            - Authentication: OAuth2UserTokenExchange
+              Name: coule-couleService
+              TokenServiceInstanceName: coule-uaa
+              TokenServiceKeyName: coule-uaa-key
+              URL: ~{srv-api/srv-url}/service/couleService
+              sap.cloud.service: lcap.coule
+              sap.applicationdevelopment.actions.enabled: false
+              sap.build.usage: CAP
+              sap.processautomation.enabled: false
+              HTML5.DynamicDestination: false
+              WebIDEEnabled: false
+              MobileEnabled: false
+              AppgyverEnabled: false
+            - Authentication: OAuth2UserTokenExchange
+              Name: coule-couleConsumerService
+              TokenServiceInstanceName: coule-uaa
+              TokenServiceKeyName: coule-uaa-key
+              URL: ~{srv-api/srv-url}/service/couleConsumerService
+              sap.cloud.service: lcap.coule
+              sap.applicationdevelopment.actions.enabled: false
+              sap.build.usage: CAP
+              sap.processautomation.enabled: false
+              HTML5.DynamicDestination: false
+              WebIDEEnabled: false
+              MobileEnabled: false
+              AppgyverEnabled: false
+    build-parameters:
+      no-source: true
+    requires:
+      - name: coule-service-uaa
+        parameters:
+          service-key:
+            name: coule-uaa-key
+      - name: srv-api
+      - name: coule-service-html5-apps-repo-host
+        parameters:
+          service-key:
+            name: coule-html5-apps-repo-host-key
+      - name: coule-service-destination
+        parameters:
+          content-target: true
+  - name: coule-launchpad
+    type: html5
+    path: build/launchpad
+    build-parameters:
+      builder: custom
+      commands:
+        - npm install
+        - >-
+          npx -p @ui5/cli@^3.0.0 ui5 build --dest dist
+          --include-task=generateCachebusterInfo
+        - bash -c "cd dist && npx bestzip ../../../build/dist/launchpad.zip *"
+        - rm -rf dist
+      _artifactName: launchpad.zip
+      supported-platforms: []
+      build-result: ../../build/dist
+  - name: coule-aux-ui-deployer
+    type: com.sap.application.content
+    path: build/ui-deployer
+    build-parameters:
+      build-result: resources
+      requires:
+        - name: coule-launchpad
+          artifacts:
+            - launchpad.zip
+          target-path: resources
+    requires:
+      - name: coule-service-html5-apps-repo-host
+        parameters:
+          content-target: true
+resources:
+  - type: org.cloudfoundry.managed-service
+    name: coule-service-uaa
+    parameters:
+      service: xsuaa
+      service-plan: application
+      service-name: coule-uaa
+      path: xs-security.json
+      config:
+        oauth2-configuration:
+          redirect-uris:
+            - https://*.${default-domain}/login/*
+        xsappname: coule-${space}
+        role-collections: []
+        tenant-mode: dedicated
+  - type: org.cloudfoundry.managed-service
+    name: coule-service-db
+    parameters:
+      service: hana
+      service-plan: hdi-shared
+      service-name: coule-db
+  - type: org.cloudfoundry.managed-service
+    name: coule-service-destination
+    parameters:
+      service: destination
+      service-plan: lite
+      service-name: coule-destination
+      config:
+        HTML5Runtime_enabled: true
+        version: 1.0.0
+  - type: org.cloudfoundry.user-provided-service
+    name: coule-service-metadata
+    parameters:
+      service: metadata
+      service-plan: standard
+      service-name: coule-metadata
+      config:
+        default-domain: ${default-domain}
+  - type: org.cloudfoundry.managed-service
+    name: coule-service-connectivity
+    parameters:
+      service: connectivity
+      service-plan: lite
+      service-name: coule-connectivity
+  - type: org.cloudfoundry.managed-service
+    name: coule-service-logs
+    parameters:
+      service: application-logs
+      service-plan: lite
+      service-name: coule-logs
+  - type: org.cloudfoundry.managed-service
+    name: coule-service-html5-apps-repo-host
+    parameters:
+      service: html5-apps-repo
+      service-plan: app-host
+      service-name: coule-html5-apps-repo-host
+  - name: coule-messaging
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: enterprise-messaging
+      service-plan: default
+      path: ./event-mesh.json
+  - name: coule-db
+    type: com.sap.xs.hdi-container
+    parameters:
+      service: hana
+      service-plan: hdi-shared

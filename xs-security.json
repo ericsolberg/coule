@@ -1,0 +1,23 @@
+{
+  "scopes": [
+    {
+      "name": "$XSAPPNAME.emcallback",
+      "description": "Enterprise-Messaging Callback Access",
+      "grant-as-authority-to-apps": [
+        "$XSSERVICENAME(coule-messaging)"
+      ]
+    },
+    {
+      "name": "$XSAPPNAME.emmanagement",
+      "description": "Enterprise-Messaging Management Access"
+    }
+  ],
+  "attributes": [],
+  "role-templates": [],
+  "xsappname": "coule",
+  "tenant-mode": "dedicated",
+  "authorities": [
+    "$XSAPPNAME.emmanagement",
+    "$XSAPPNAME.mtcallback"
+  ]
+}
